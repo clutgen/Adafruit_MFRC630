@@ -65,26 +65,26 @@ int main() {
         }
         std::cout << std::dec << std::endl;
         std::cout << "" << std::endl;
-        // if (uidlen == 4) {
-        //     /* Assume Mifare Classic/Plus and set the global/default key. */
-        //     reader.mifareLoadKey(reader.mifareKeyGlobal);
-        //     /* Try to authenticate sectors 0..15. */
-        //     for (uint8_t s = 0; s < 16; s++) {
-        //         /* Try to authenticate this sector. */
-        //         std::cout << "Sector " << s << std::endl;
-        //         if(reader.mifareAuth(MIFARE_CMD_AUTH_A, s*4, uid)) {
-        //             /* We should be able to read the sector contents now. */
-        //             radio_mifare_dump_sector(reader, s);
-        //         } else {
-        //             std::cout << "AUTH_A failed for sector ";
-        //             std::cout << s << std::endl;
-        //         }
-        //     }
-        //     rc = true;
-        // } else {
-        //     std::cout << "Unexpected UID length: " << uidlen << std::endl;
-        //     rc = false;
-        // }
+        if (uidlen == 4) {
+            /* Assume Mifare Classic/Plus and set the global/default key. */
+            reader.mifareLoadKey(reader.mifareKeyGlobal);
+            /* Try to authenticate sectors 0..15. */
+            for (uint8_t s = 0; s < 16; s++) {
+                /* Try to authenticate this sector. */
+                std::cout << "Sector " << s << std::endl;
+                if(reader.mifareAuth(MIFARE_CMD_AUTH_A, s*4, uid)) {
+                    /* We should be able to read the sector contents now. */
+                    radio_mifare_dump_sector(reader, s);
+                } else {
+                    std::cout << "AUTH_A failed for sector ";
+                    std::cout << s << std::endl;
+                }
+            }
+            rc = true;
+        } else {
+            std::cout << "Unexpected UID length: " << uidlen << std::endl;
+            rc = false;
+        }
     } else {
         /* No tag found! */
         rc = false;
