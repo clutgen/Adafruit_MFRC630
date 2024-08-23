@@ -6,10 +6,21 @@
 
 #include "Adafruit_MFRC630_consts.h"
 #include "Adafruit_MFRC630_regs.h"
-#include "Arduino.h"
-#include <SPI.h>
-#include <Stream.h>
-#include <Wire.h>
+#include <unistd.h>				//Needed for I2C port
+#include <fcntl.h>				//Needed for I2C port
+#include <sys/ioctl.h>			//Needed for I2C port
+#include <linux/i2c-dev.h>		//Needed for I2C port 
+#include <stdio.h>
+#include <cstring>
+#include <iostream>
+#include <chrono>
+
+// Assuming you have something like millis() implemented for timing
+static unsigned long millis() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+}
 
 /*!
  * @brief MFRC630 I2C Address
@@ -25,18 +36,18 @@
 #define MFRC630_VERBOSITY_DEBUG (1)   //!< Debug message output
 #define MFRC630_VERBOSITY_TRACE (2)   //!< Full packet trace dumps
 #define MFRC630_VERBOSITY                                                      \
-  (MFRC630_VERBOSITY_RELEASE) //!< Sets verbosity variable
+  (MFRC630_VERBOSITY_DEBUG) //!< Sets verbosity variable
 
 #define MFRC630_ALWAYS_DISP_ERRORS (1) //!< Sets error output
 
 /* Macro for debug output */
 #if MFRC630_VERBOSITY >= MFRC630_VERBOSITY_DEBUG
-#define DEBUG_PRINT(...) Serial.print(__VA_ARGS__)
-#define DEBUG_PRINTLN(...) Serial.println(__VA_ARGS__)
+#define DEBUG_PRINT(...) std::cout << __VA_ARGS__ 
+#define DEBUG_PRINTLN(...) std::cout << __VA_ARGS__ << std::endl
 #define DEBUG_TIMESTAMP()                                                      \
-  Serial.print(F("\tD [+"));                                                   \
-  Serial.print(millis());                                                      \
-  Serial.print(F("ms] "));
+  std::cout << "\t! [+";                                                      \
+  std::cout << millis();                                                      \
+  std::cout << "ms] "; //!< Enables error timestamp
 #else
 #define DEBUG_PRINT(...)     //!< Disables debug printing
 #define DEBUG_PRINTLN(...)   //!< Disables debug println
@@ -45,12 +56,12 @@
 
 /* Macro for trace output */
 #if MFRC630_VERBOSITY >= MFRC630_VERBOSITY_TRACE
-#define TRACE_PRINT(...) Serial.print(__VA_ARGS__)
-#define TRACE_PRINTLN(...) Serial.println(__VA_ARGS__)
+#define TRACE_PRINT(...) std::cout << __VA_ARGS__ 
+#define TRACE_PRINTLN(...) std::cout << __VA_ARGS__ << std::endl
 #define TRACE_TIMESTAMP()                                                      \
-  Serial.print(F("\t. [+"));                                                   \
-  Serial.print(millis());                                                      \
-  Serial.print(F("ms] "));
+  std::cout << "\t! [+";                                                      \
+  std::cout << millis();                                                      \
+  std::cout << "ms] "; //!< Enables error timestamp
 #else
 #define TRACE_PRINT(...)     //!< Disables trace output printing
 #define TRACE_PRINTLN(...)   //!< Disables trace output println
@@ -59,20 +70,19 @@
 
 /* Macro for error output */
 #if MFRC630_ALWAYS_DISP_ERRORS
-#define ERROR_PRINT(...) Serial.print(__VA_ARGS__) //!< Enables error printing
-#define ERROR_PRINTLN(...)                                                     \
-  Serial.println(__VA_ARGS__) //!< Enables error println
-#define ERROR_TIMESTAMP()                                                      \
-  Serial.print(F("\t! [+"));                                                   \
-  Serial.print(millis());                                                      \
-  Serial.print(F("ms] ")); //!< Enables error timestamp
+#define ERROR_PRINT(...) std::cout << __VA_ARGS__ //!< Enables error printing
+#define ERROR_PRINTLN(...) std::cout << __VA_ARGS__ << std::endl //!< Enables error println
+#define ERROR_TIMESTAMP()                                                     \
+  std::cout << "\t! [+";                                                      \
+  std::cout << millis();                                                      \
+  std::cout << "ms] "; //!< Enables error timestamp
 #else
 #define ERROR_PRINT(...) DEBUG_PRINT(__VA_ARGS__)
 #define ERROR_PRINTLN(...) DEBUG_PRINTLN(__VA_ARGS__)
-#define ERROR_TIMESTAMP()                                                      \
-  DEBUG_PRINT(F("\t! [+"));                                                    \
-  DEBUG_PRINT(millis());                                                       \
-  DEBUG_PRINT(F("ms] "));
+#define ERROR_TIMESTAMP()                                                     \
+  DEBUG_PRINT("\t! [+");                                                      \
+  DEBUG_PRINT(millis());                                                      \
+  DEBUG_PRINT("ms] ");
 #endif
 
 /*!
@@ -98,36 +108,6 @@ public:
   Adafruit_MFRC630(uint8_t i2c_addr, int8_t pdown_pin = -1);
 
   /**
-   * Custom I2C bus constructor with user-defined I2C bus
-   *
-   * @param wireBus       The I2C bus to use
-   * @param i2c_addr      The I2C address to use (default value is empty)
-   * @param pdown_pin     The power down pin number (required)/
-   */
-  Adafruit_MFRC630(TwoWire *wireBus, uint8_t i2c_addr, int8_t pdown_pin = -1);
-
-  /**
-   * HW SPI bus constructor
-   *
-   * @param transport     The transport to use when communicating with the IC
-   * @param cs            The CS/Sel pin for HW SPI access.
-   * @param pdown_pin     The power down pin number (required)/
-   *
-   * @note This instance of the constructor requires the 'transport'
-   *       parameter to distinguish is from the default I2C version.
-   */
-  Adafruit_MFRC630(enum mfrc630_transport transport, int8_t cs,
-                   int8_t pdown_pin = -1);
-
-  /**
-   * SW serial bus constructor
-   *
-   * @param serial        The Serial instance to use
-   * @param pdown_pin     The power down pin number (required)/
-   */
-  Adafruit_MFRC630(Stream *serial, int8_t pdown_pin = -1);
-
-  /**
    * Initialises the IC and performs some simple system checks.
    *
    * @return True if init succeeded, otherwise false.
@@ -136,29 +116,29 @@ public:
 
   /* FIFO helpers (see section 7.5) */
   /**
-   * Returns the number of bytes current in the FIFO buffer.
+   * Returns the number of uint8_ts current in the FIFO buffer.
    *
-   * @return The number of bytes in the FIFO buffer.
+   * @return The number of uint8_ts in the FIFO buffer.
    */
   int16_t readFIFOLen(void);
 
   /**
    * Reads data from the FIFO buffer.
    *
-   * @param len       The number of bytes to read
+   * @param len       The number of uint8_ts to read
    * @param buffer    The buffer to write data into.
    *
-   * @return The actual number of bytes read from the FIFO buffer.
+   * @return The actual number of uint8_ts read from the FIFO buffer.
    */
   int16_t readFIFO(uint16_t len, uint8_t *buffer);
 
   /**
    * Write sdata into the FIFO buffer.
    *
-   * @param len       The number of bytes to write.
+   * @param len       The number of uint8_ts to write.
    * @param buffer    The data to write into the FIFO buffer.
    *
-   * @return The actual number of bytes written.
+   * @return The actual number of uint8_ts written.
    */
   int16_t writeFIFO(uint16_t len, uint8_t *buffer);
 
@@ -173,16 +153,16 @@ public:
    *
    * @param command   The command register to send.
    */
-  void writeCommand(byte command);
+  void writeCommand(uint8_t command);
 
   /**
    * Sends a parametrized command to the IC.
    *
    * @param command   The command register to send.
-   * @param paramlen  The number of parameter bytes.
+   * @param paramlen  The number of parameter uint8_ts.
    * @param params    The paramater values to send.
    */
-  void writeCommand(byte command, uint8_t paramlen, uint8_t *params);
+  void writeCommand(uint8_t command, uint8_t paramlen, uint8_t *params);
 
   /* Radio config. */
   /**
@@ -258,7 +238,7 @@ public:
    * @param blocknum  The block number to read.
    * @param buf       The buffer the data should be written into.
    *
-   * @return The number of bytes read.
+   * @return The number of uint8_ts read.
    */
   uint16_t mifareReadBlock(uint8_t blocknum, uint8_t *buf);
 
@@ -269,7 +249,7 @@ public:
    * @param blocknum  The block number to read.
    * @param buf       The buffer holding the data to write.
    *
-   * @return The number of bytes written.
+   * @return The number of uint8_ts written.
    */
   uint16_t mifareWriteBlock(uint16_t blocknum, uint8_t *buf);
 
@@ -290,7 +270,7 @@ public:
    * @param pagenum   The page number to read.
    * @param buf       The buffer the data should be written into.
    *
-   * @return The number of bytes read.
+   * @return The number of uint8_ts read.
    */
   uint16_t ntagReadPage(uint16_t pagenum, uint8_t *buf);
 
@@ -300,26 +280,27 @@ public:
    * @param pagenum   The page number to write to.
    * @param buf       The data to write to the card.
    *
-   * @return The number of bytes written.
+   * @return The number of uint8_ts written.
    */
   uint16_t ntagWritePage(uint16_t pagenum, uint8_t *buf);
 
 private:
   int8_t _pdown;
   uint8_t _i2c_addr;
-  TwoWire *_wire;
-  Stream *_serial;
   int8_t _cs;
   enum mfrc630_transport _transport;
 
-  void write8(byte reg, byte value);
-  void writeBuffer(byte reg, uint16_t len, uint8_t *buffer);
-  byte read8(byte reg);
+  void write8(uint8_t reg, uint8_t value);
+  void writeBuffer(uint8_t reg, uint16_t len, uint8_t *buffer);
+  uint8_t read8(uint8_t reg);
 
   void printHex(uint8_t *buf, size_t len);
   void printError(enum mfrc630errors err);
 
   uint16_t iso14443aCommand(enum iso14443_cmd cmd);
+
+  char *_filename;
+  int _file_i2c;
 };
 
 #endif
